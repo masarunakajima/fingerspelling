@@ -121,6 +121,47 @@ def prep_dataset_nodrop(parquet_paths, label_path, input_length, output_length,
     return dataset
 
 
+def prep_dataset_allstart(parquet_paths, label_path, input_length, output_length, 
+                 selected_columns, tokenizer):
+    df = pd.DataFrame()
+    for parquet_path in parquet_paths:
+      temp_df = pd.read_parquet(parquet_path, columns = selected_columns)
+      df = pd.concat([df, temp_df])   
+
+    df.fillna(0, inplace = True)
+    grouped_df = df.groupby(df.index).apply(lambda x: x.values)
+    grouped_values = grouped_df.apply(lambda x: adjust_seq_len(x, input_length))
+    encoder_inputs = np.stack(grouped_values.values).astype(np.float32)
+    # encoder_inputs = tf.convert_to_tensor(grouped_values)
+
+
+    # get the phrase rows for each sequence_ids in order
+    sequence_ids = df.index.unique()
+    phrase_df = pd.read_csv(label_path)
+    phrase_df = phrase_df.set_index('sequence_id')
+    phrase_df = phrase_df.loc[sequence_ids]
+
+    tokenized_seqs = tokenizer.texts_to_sequences(phrase_df['phrase'].values)
+
+    decoder_input_seqs = [[tokenizer.word_index['<SOS>']]*len(seq)  for seq in tokenized_seqs]
+    decoder_inputs = tf.keras.preprocessing.sequence.pad_sequences(decoder_input_seqs, 
+                                                                   maxlen = output_length, 
+                                                                   padding = 'post', 
+                                                                   truncating = 'post')
+    decoder_inputs = decoder_inputs.astype(np.int32)
+
+    label_seqs = [seq + [tokenizer.word_index['<EOS>']] for seq in tokenized_seqs]
+    label_seqs = tf.keras.preprocessing.sequence.pad_sequences(label_seqs, maxlen = output_length, padding = 'post', truncating = 'post')
+    label_seqs = label_seqs.astype(np.int32)
+
+    # print(encoder_inputs.shape)
+    # print(decoder_inputs.shape)
+    # print(label_seqs.shape)
+
+
+    dataset = tf.data.Dataset.from_tensor_slices(((encoder_inputs, decoder_inputs), label_seqs))
+    return dataset
+
 
 def get_tokenizer(c2t_path):
     with open (c2t_path, "r") as f:
@@ -587,7 +628,7 @@ if __name__ == '__main__':
 
     num_files = len(train_files)
 
-    valid_dataset = prep_dataset_nodrop(valid_files, label_path, input_length, 
+    valid_dataset = prep_dataset_allstart(valid_files, label_path, input_length, 
                                  output_length, selected_columns, tokenizer)
     valid_dataset = valid_dataset.batch(batch_size)
     valid_dataset = valid_dataset.prefetch(tf.data.AUTOTUNE)
@@ -597,14 +638,14 @@ if __name__ == '__main__':
         for i in range(num_files//n_files):
             print("dataset {}/{}".format(i+1, num_files//n_files))
             current = i*n_files
-            dataset = prep_dataset_nodrop(train_files[current:(current+n_files)], label_path, 
+            dataset = prep_dataset_allstart(train_files[current:(current+n_files)], label_path, 
                                     input_length, output_length, selected_columns, tokenizer)
             dataset = dataset.batch(batch_size)
             dataset = dataset.prefetch(tf.data.AUTOTUNE)
             history = model.fit(dataset, validation_data = valid_dataset, epochs=runs_per_epoch)
             tf.keras.backend.clear_session()
         if current+n_files != num_files:
-            dataset = prep_dataset_nodrop(train_files[(current+n_files):], label_path, 
+            dataset = prep_dataset_allstart(train_files[(current+n_files):], label_path, 
                                     input_length, output_length, selected_columns, tokenizer)
             dataset = dataset.batch(batch_size)
             dataset = dataset.prefetch(tf.data.AUTOTUNE)

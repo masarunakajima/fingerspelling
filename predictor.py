@@ -45,7 +45,43 @@ def get_history(model_path):
     return history
 
 
+class FingerGenModelSeq(tf.keras.Model):
+    def __init__(self, transformer, max_output_len, SOS_token, EOS_token):
+        super(FingerGenModelSeq, self).__init__()
+        self.transformer = transformer
+        self.max_output_len = max_output_len
+        self.sos = SOS_token
+        self.eos = EOS_token
 
+
+
+
+    def call(self, inputs):
+        
+        x = tf.cast(inputs, tf.float32)[None]
+        x = tf.where(tf.math.is_nan(x), tf.zeros_like(x), x)
+        x = tf.image.resize(x, (tf.shape(x)[0], self.transformer.seq_len))
+        # print(x.shape)
+        ta = tf.TensorArray(tf.int32, size=0, dynamic_size=True, clear_after_read=False)
+        ta.write(0, tf.expand_dims(SOS_token, 0))
+        dec_input = tf.transpose(ta.stack())
+        # logits = self.transformer([x, dec_input], training=False)
+        # dec_input = tf.expand_dims([SOS_token], 0)
+        logits = self.transformer([x, dec_input], training=False)
+
+
+        # @tf.function
+        # def tensor_iteration():
+        #     x = tf.constant([1, 2, 3, 4, 5])
+        #     sum = tf.constant(0)
+            
+        #     for i in tf.range(tf.size(x)):
+        #         sum += x[i]
+            
+        #     return sum
+        
+        return logits[0, :, 1:-2]
+        # return ta
 
 
 
@@ -59,14 +95,12 @@ class FingerGenModel(tf.keras.Model):
         self.sos = SOS_token
         self.eos = EOS_token
 
-
     def call(self, inputs):
-
-        x = tf.cast(x, tf.float32)[None]
+        x = tf.cast(inputs, tf.float32)[None]
         x = tf.where(tf.math.is_nan(x), tf.zeros_like(x), x)
         x = tf.image.resize(x, (tf.shape(x)[0], self.transformer.seq_len))
         # print(x.shape)
-        dec_input = tf.expand_dims([SOS_token], 0)
+        dec_input = tf.expand_dims([SOS_token]*max_output_len, 0)
         logits = self.transformer([x, dec_input], training=False)
         # generate tensor full of nan
         
@@ -152,8 +186,8 @@ if __name__ == "__main__":
 
 
     converter = tf.lite.TFLiteConverter.from_keras_model(finger_gen)
-    # converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS, tf.lite.OpsSet.SELECT_TF_OPS]
-    # converter._experimental_lower_tensor_list_ops = False
+    converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS, tf.lite.OpsSet.SELECT_TF_OPS]
+    converter._experimental_lower_tensor_list_ops = False
     tflite_model = converter.convert()
 
     working_dir = "."
