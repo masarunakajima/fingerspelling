@@ -48,134 +48,7 @@ def get_history(model_path):
 
 
 
-class FingerSpellingModel(tf.keras.Model):
-    def __init__(self, transformer, max_output_len, SOS_token, EOS_token):
-        super(FingerSpellingModel, self).__init__()
-        self.transformer = transformer
-        self.max_output_len = max_output_len
-        self.sos = SOS_token
-        self.eos = EOS_token
 
-    
-    def preprocess(self, inputs):
-        # input is of dimension (frames, input_dim) 
-        inputs = np.array(inputs)
-        nan_rows = np.isnan(inputs).all(axis=1)
-        if len(nan_rows) > 0:
-            inputs = inputs[~nan_rows]
-        inputs = np.nan_to_num(inputs, 0)
-        seq_len = inputs.shape[0]
-        if seq_len < self.transformer.seq_len:
-            inputs = tf.pad(inputs, [[0, self.transformer.seq_len - seq_len], [0, 0]])
-        else:
-            inputs = inputs[:self.transformer.seq_len]
-        inputs = tf.expand_dims(inputs, axis=0)
-        return inputs   
-
-
-
-
-    def call(self, inputs):
-        offset = 1
-        offset_tail = 1
-        enc_input = self.preprocess(inputs)
-        output_label = [self.sos]
-        output_array = np.array(output_label).reshape(1, -1)
-        dec_input = tf.convert_to_tensor(output_array, dtype=tf.int32)
-        predictions = self.transformer([enc_input, dec_input])
-
-
-        for i in tf.range(self.max_output_len):
-            
-            predictions = self.transformer([enc_input, dec_input])
-            predictions_red = predictions[:, -1:, offset:-offset_tail]
-            predicted_id = tf.cast(tf.argmax(predictions_red, axis=-1), tf.int32)
-            predicted_id = int(predicted_id.numpy()[0][0] + offset)
-
-            if predicted_id == int(self.eos):
-                break
-            output_label.append(predicted_id)
-            output_array = np.array(output_label).reshape(1, -1)  
-            dec_input = tf.convert_to_tensor(output_array, dtype=tf.int32)
-
-        output_label = [token - offset for token in output_label[1:]]
-
-        print("Prediction: ", output_label)
-        
-     
-        return predictions[:, :, 1:-2]
-    
-class PreprocessLayer(tf.keras.layers.Layer):
-    def __init__(self, seq_len):
-        super(PreprocessLayer, self).__init__()
-        self.seq_len = seq_len
-        
-    def __call__(self, x):
-        #x = tf.expand_dims(x, 0)
-        nan_mask = tf.reduce_all(tf.math.is_nan(x), axis=1)
-        # if tf.reduce_sum(tf.cast(nan_mask, tf.int32)) > 0:
-        x = tf.boolean_mask(x, ~nan_mask)
-        x = x[None]
-        x = tf.where(tf.math.is_nan(x), tf.zeros_like(x), x)
-        x = tf.image.resize(x, (tf.shape(x)[0], self.seq_len))
-        # x = x[0]
-        return x
-
-
-class FingerSpellingVectorModel(tf.keras.Model):
-    def __init__(self, transformer, seq_len,  max_output_len, SOS_token, EOS_token):
-        super(FingerSpellingVectorModel, self).__init__()
-        self.transformer = transformer
-        self.seq_len = seq_len
-        self.max_output_len = max_output_len
-        self.sos = SOS_token
-        self.eos = EOS_token
-
-        self.preprocess_layer = PreprocessLayer(seq_len)
-
- 
-    @tf.function(input_signature=[tf.TensorSpec(shape=[None, len(selected_columns)], 
-                                                dtype=tf.float32, name='inputs')])
-    def __call__(self, inputs):
-        offset = 1
-        offset_tail = 1
-        enc_input = self.preprocess_layer(inputs)
-        output_label = [self.sos]
-        output_array = tf.TensorArray(dtype=tf.int32, size=0, dynamic_size=True)
-        output_array = output_array.write(0, tf.constant([self.sos], dtype=tf.int32))
-
-        logits = self.transformer([enc_input, tf.transpose(output_array.stack())], training=False)
-
-        for i in tf.range(self.max_output_len):
-
-            
-            logits = self.transformer([enc_input, tf.transpose(output_array.stack())], 
-                                      training=False)
-            pred = tf.reduce_max(logits[0,-1,:], axis=-1, keepdims=True)
-            # print(preds.shape)
-            output_array = output_array.write(i+1, tf.cast(pred, tf.int32))
-
-            
-
-            # predictions_red = predictions[:, -1:, offset:-offset_tail]
-            # predicted_id = tf.cast(tf.argmax(predictions_red, axis=-1), tf.int32)
-            # predicted_id = int(predicted_id.numpy()[0][0] + offset)
-
-            # # if predicted_id == int(self.eos):
-            # #     break
-            # output_label.append(predicted_id)
-            # output_array = np.array(output_label).reshape(1, -1)  
-            # dec_input = tf.convert_to_tensor(output_array, dtype=tf.int32)
-
-        # output_label = [token - offset for token in output_label[1:]]
-
-        logits = logits[:, :, 1:-2]
-        preds = tf.nn.softmax(logits, axis=-1)
-
-        # print("Prediction: ", output_label)
-        
-     
-        return preds[0]
 
 
 class FingerGenModel(tf.keras.Model):
@@ -256,8 +129,6 @@ if __name__ == "__main__":
     mat = df.loc[sequence_id, :].values
 
     phrase = labels.loc[labels['sequence_id'] == sequence_id, 'phrase'].values[0]
-
-
     
     # get one sample from dataset   
     sample = next(iter(dataset))
@@ -274,18 +145,6 @@ if __name__ == "__main__":
     # input_shape = ((None, input_length, input_dim))
 
     model.load_weights(weights_path)
-
-    finger_model = FingerSpellingModel(model,  max_output_len, SOS_token, EOS_token)
-    finger_vector_model = FingerSpellingVectorModel(model, input_length,  max_output_len, SOS_token, EOS_token)
-
-    logits = finger_model(inputs = mat)
-    actual_label = tokenizer.texts_to_sequences([phrase])[0]
-    actual_label = [token - 1 for token in actual_label]
-    print("Actual phrase: ", actual_label)
-
-    preds = finger_vector_model(inputs = tf.convert_to_tensor(mat))
-    print("preds: ", preds.shape)
-
 
     finger_gen = FingerGenModel(model, max_output_len, SOS_token, EOS_token)
     preds = finger_gen(inputs = tf.convert_to_tensor(mat))
