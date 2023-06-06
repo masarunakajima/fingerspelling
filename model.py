@@ -86,7 +86,7 @@ def prep_dataset_nodrop(parquet_paths, label_path, input_length, output_length,
       temp_df = pd.read_parquet(parquet_path, columns = selected_columns)
       df = pd.concat([df, temp_df])   
 
-    sequence_ids = df.index.unique()
+    df.fillna(0, inplace = True)
     grouped_df = df.groupby(df.index).apply(lambda x: x.values)
     grouped_values = grouped_df.apply(lambda x: adjust_seq_len(x, input_length))
     encoder_inputs = np.stack(grouped_values.values).astype(np.float32)
@@ -94,6 +94,7 @@ def prep_dataset_nodrop(parquet_paths, label_path, input_length, output_length,
 
 
     # get the phrase rows for each sequence_ids in order
+    sequence_ids = df.index.unique()
     phrase_df = pd.read_csv(label_path)
     phrase_df = phrase_df.set_index('sequence_id')
     phrase_df = phrase_df.loc[sequence_ids]
@@ -111,9 +112,9 @@ def prep_dataset_nodrop(parquet_paths, label_path, input_length, output_length,
     label_seqs = tf.keras.preprocessing.sequence.pad_sequences(label_seqs, maxlen = output_length, padding = 'post', truncating = 'post')
     label_seqs = label_seqs.astype(np.int32)
 
-    print(encoder_inputs.shape)
-    print(decoder_inputs.shape)
-    print(label_seqs.shape)
+    # print(encoder_inputs.shape)
+    # print(decoder_inputs.shape)
+    # print(label_seqs.shape)
 
 
     dataset = tf.data.Dataset.from_tensor_slices(((encoder_inputs, decoder_inputs), label_seqs))
@@ -393,17 +394,6 @@ class Decoder(tf.keras.layers.Layer):
     return x
   
 
-class PreprocessLayer(tf.keras.layers.Layer):
-    def __init__(self, seq_len):
-        super(PreprocessLayer, self).__init__()
-        self.seq_len = seq_len
-        
-    def __call__(self, x):
-        # assuming input shape (None, input_dim)
-        x = x[None]
-        x = tf.where(tf.math.is_nan(x), tf.zeros_like(x), x)
-        x = tf.image.resize(x, (tf.shape(x)[0], self.seq_len))
-        return x
 
 
 class Transformer(tf.keras.Model):
@@ -534,7 +524,7 @@ if __name__ == '__main__':
                         ]
 
 
-
+    model_dir = "models"
 
 
     data_path = 'data/train_landmarks'
@@ -547,17 +537,17 @@ if __name__ == '__main__':
     label_path = 'train.csv'
     c2p_path = 'character_to_prediction_index.json'
 
-    input_length = 200
+    input_length = 400
     input_dim = len(selected_columns)
     output_length = 32
 
     tokenizer = get_tokenizer(c2p_path)
-    n_files = 7
+    n_files = 10
 
 
 
 
-    d_model = 128*4
+    d_model = 128*2
     vocab_size = len(tokenizer.word_index)
 
     num_layers = 4
@@ -566,8 +556,8 @@ if __name__ == '__main__':
     dropout_rate = 0.1
 
     batch_size = 128
-    epochs = 5
-    runs_per_epoch = 10
+    epochs = 1
+    runs_per_epoch = 1
 
     model_param ={
         'seq_len': input_length,
@@ -597,7 +587,7 @@ if __name__ == '__main__':
 
     num_files = len(train_files)
 
-    valid_dataset = prep_dataset(valid_files, label_path, input_length, 
+    valid_dataset = prep_dataset_nodrop(valid_files, label_path, input_length, 
                                  output_length, selected_columns, tokenizer)
     valid_dataset = valid_dataset.batch(batch_size)
     valid_dataset = valid_dataset.prefetch(tf.data.AUTOTUNE)
@@ -607,20 +597,19 @@ if __name__ == '__main__':
         for i in range(num_files//n_files):
             print("dataset {}/{}".format(i+1, num_files//n_files))
             current = i*n_files
-            dataset = prep_dataset(train_files[current:(current+n_files)], label_path, 
+            dataset = prep_dataset_nodrop(train_files[current:(current+n_files)], label_path, 
                                     input_length, output_length, selected_columns, tokenizer)
             dataset = dataset.batch(batch_size)
             dataset = dataset.prefetch(tf.data.AUTOTUNE)
             history = model.fit(dataset, validation_data = valid_dataset, epochs=runs_per_epoch)
             tf.keras.backend.clear_session()
         if current+n_files != num_files:
-            dataset = prep_dataset(train_files[(current+n_files):], label_path, 
+            dataset = prep_dataset_nodrop(train_files[(current+n_files):], label_path, 
                                     input_length, output_length, selected_columns, tokenizer)
             dataset = dataset.batch(batch_size)
             dataset = dataset.prefetch(tf.data.AUTOTUNE)
             history = model.fit(dataset,validation_data = valid_dataset, epochs=runs_per_epoch)
 
-    model_dir = "models"
     model_paths = glob.glob(path.join(model_dir, '*'))
     model_nums = [int(model_path.split('_')[-1]) for model_path in model_paths]
     if len(model_nums) == 0:
