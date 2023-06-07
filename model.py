@@ -154,9 +154,9 @@ def prep_dataset_allstart(parquet_paths, label_path, input_length, output_length
     label_seqs = tf.keras.preprocessing.sequence.pad_sequences(label_seqs, maxlen = output_length, padding = 'post', truncating = 'post')
     label_seqs = label_seqs.astype(np.int32)
 
-    # print(encoder_inputs.shape)
-    # print(decoder_inputs.shape)
-    # print(label_seqs.shape)
+    print(encoder_inputs.shape)
+    print(decoder_inputs.shape)
+    print(label_seqs.shape)
 
 
     dataset = tf.data.Dataset.from_tensor_slices(((encoder_inputs, decoder_inputs), label_seqs))
@@ -226,6 +226,16 @@ class PositionalEmbeddingSeq(tf.keras.layers.Layer):
 
 
 
+  def call(self, x):
+    x = self.masking(x)
+    x = self.linear(x)
+    # This factor sets the relative scale of the embedding and positonal_encoding.
+    # x *= tf.math.sqrt(tf.cast(self.d_model, tf.float32))
+    x = x + self.pos_encoding[tf.newaxis, :, :]
+    return x
+
+
+
 
 class PositionalEmbedding(tf.keras.layers.Layer):
   def __init__(self, vocab_size, d_model):
@@ -269,8 +279,7 @@ class CrossAttention(BaseAttention):
     x = self.add([x, attn_output])
     x = self.layernorm(x)
 
-    return x
-  
+    return x  
 
 
 class GlobalSelfAttention(BaseAttention):
@@ -332,6 +341,7 @@ class EncoderLayer(tf.keras.layers.Layer):
 
   def call(self, x):
     x = self.self_attention(x)
+    print(x.shape)
     x = self.ffn(x)
     return x
 
@@ -464,7 +474,10 @@ class Transformer(tf.keras.Model):
   def call(self, inputs):
     # To use a Keras model with `.fit` you must pass all your inputs in the
     # first argument.
-    context, x  = inputs
+    context, x  = inputs  
+    print(context.shape)
+    print(x.shape)  
+
 
     context = self.encoder(context)  # (batch_size, context_len, d_model)
 
@@ -597,8 +610,8 @@ if __name__ == '__main__':
     dropout_rate = 0.1
 
     batch_size = 128
-    epochs = 1
-    runs_per_epoch = 1
+    epochs = 5
+    runs_per_epoch = 5
 
     model_param ={
         'seq_len': input_length,

@@ -63,7 +63,7 @@ class FingerGenModelSeq(tf.keras.Model):
         x = tf.image.resize(x, (tf.shape(x)[0], self.transformer.seq_len))
         # print(x.shape)
         ta = tf.TensorArray(tf.int32, size=0, dynamic_size=True, clear_after_read=False)
-        ta.write(0, tf.expand_dims(SOS_token, 0))
+        ta.write(0, tf.expand_dims(self.sos, 0))
         dec_input = tf.transpose(ta.stack())
         # logits = self.transformer([x, dec_input], training=False)
         # dec_input = tf.expand_dims([SOS_token], 0)
@@ -95,16 +95,18 @@ class FingerGenModel(tf.keras.Model):
         self.sos = SOS_token
         self.eos = EOS_token
 
+    @tf.function(input_signature=[tf.TensorSpec(shape=[None, len(selected_columns)], 
+                                                dtype=tf.float32, name='inputs')])
     def call(self, inputs):
         x = tf.cast(inputs, tf.float32)[None]
         x = tf.where(tf.math.is_nan(x), tf.zeros_like(x), x)
         x = tf.image.resize(x, (tf.shape(x)[0], self.transformer.seq_len))
         # print(x.shape)
-        dec_input = tf.expand_dims([SOS_token]*max_output_len, 0)
+        dec_input = tf.expand_dims([self.sos]*self.max_output_len, 0)
         logits = self.transformer([x, dec_input], training=False)
         # generate tensor full of nan
         
-        return logits[0, :, 1:-2]
+        return {'outputs': logits[0, :, 1:-2]}
 
 
 
