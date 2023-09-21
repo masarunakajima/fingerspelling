@@ -32,7 +32,15 @@ and sequence of classes as ouput for ASL finger spelling detection.
 
 # from tensorflow import keras
 import tensorflow as tf
-from tensorflow.keras.layers import Layer, Embedding
+from tensorflow.keras.layers import (
+    Layer,
+    Embedding,
+    Conv1D,
+    MultiHeadAttention,
+    Dense,
+    Dropout,
+    LayerNormalization,
+)
 
 
 def pos_encode(seq_len, dim):
@@ -58,13 +66,82 @@ def pos_encode(seq_len, dim):
     return tf.math.add(sin, cos)
 
 
-# class Embedding1D(Layer):
-    # """
-    # Embedding layer for 1D sequence of tokens
-    # """
+class Embedding1D(Layer):
+    """
+    Embedding layer for 1D sequence of tokens
+    """
 
-    # def __init__(self, seq_len, num_class, num_hid=64):
-        # super().__init__()
+    def __init__(self, seq_len, num_class, num_hid=64):
+        super().__init__()
+
+        self.embed = Embedding(input_dim=num_class, output_dim=num_hid)
+        self.seq_len = seq_len
+        self.num_class = num_class
+        self.num_hid = num_hid
+
+    def call(self, input):
+        x = self.embed(input)
+        return x + pos_encode(self.seq_len, self.num_hid)
+
+
+class Embedding2D(Layer):
+    """
+    Embedding layer for 2D data. Particularly sequence of 1D data.
+    This involves 1D convolution.
+    """
+
+    def __init__(self, num_conv=3, kernel=3, num_hid=64):
+        super().__init__()
+
+        self.num_conv = num_conv
+        self.kernel = kernel
+        self.num_hid = num_hid
+        self.conv_layers = [
+            Conv1D(
+                num_hid,
+                kernel,
+                padding="same",
+                activation="relu",
+                name=f"conv_layer_{i}",
+            )
+            for i in range(num_conv)
+        ]
+
+    def call(self, input):
+        x = input
+        for conv_layer in self.conv_layers:
+            x = conv_layer(x)
+        return x
+
+
+class Encoder(Layer):
+    """
+    Transformer encoder
+    """
+
+    def __init__(self, embed_dim=64, num_heads=4, drop_rate=0.1):
+        super().__init__()
+
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.drop_rate = drop_rate
+
+        self.attention = MultiHeadAttention(
+            num_heads=num_heads, key_dim=embed_dim
+        )
+        self.drop1 = Dropout(drop_rate)
+        self.layer_norm1 = LayerNormalization()
+        self.ffd = Dense(embed_dim, activation="relu")
+        self.drop2 = Dropout(drop_rate)
+        self.layer_norm2 = LayerNormalization()
+
+    def call(self, input):
+        x = self.attention(input, input)
+        x = self.drop1(x)
+        x = self.layer_norm1(input + x)
+        y = self.ffd(x)
+        y = self.drop2(y)
+        return self.layer_norm2(x + y)
 
 
 # def get_study_title(study_data_frame):
