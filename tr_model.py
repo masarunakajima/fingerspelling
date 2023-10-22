@@ -32,6 +32,8 @@ and sequence of classes as ouput for ASL finger spelling detection.
 
 # from tensorflow import keras
 import tensorflow as tf
+from tensorflow.keras import Model
+from tensorflow.keras import Sequential
 from tensorflow.keras.layers import (
     Layer,
     Embedding,
@@ -144,14 +146,123 @@ class Encoder(Layer):
         return self.layer_norm2(x + y)
 
 
-# def get_study_title(study_data_frame):
-# """
-# Get the study title from the first row of a data frame.
-# """
-# try:
-# return study_data_frame.iloc[0].study_title
-# except AttributeError as attrib_err:
-# attrib_err.add_note(  # pylint: disable=E1101
-# "'study_title' not found in dataframe"
-# )
-# raise attrib_err
+class Decoder(Layer):
+    """
+    Transformer decoder
+    """
+
+    def __init__(self, embed_dim=64, num_heads=4, drop_rate=0.1):
+        super().__init__()
+
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.drop_rate = drop_rate
+
+        self.self_attn = MultiHeadAttention(
+            num_heads=num_heads, key_dim=embed_dim, use_causal_mask=True
+        )
+        self.drop1 = Dropout(drop_rate)
+        self.layer_norm1 = LayerNormalization()
+        self.cross_attn = MultiHeadAttention(
+            num_heads=num_heads,
+            key_dim=embed_dim,
+        )
+        self.drop2 = Dropout(drop_rate)
+        self.layer_norm2 = LayerNormalization()
+        self.ffd = Dense(embed_dim, activation="relu")
+        self.drop3 = Dropout(drop_rate)
+        self.layer_norm3 = LayerNormalization()
+
+    def call(self, enc, target):
+        x = self.self_attn(target, target)
+        x = self.drop1(x)
+        x = self.layer_norm1(x + target)
+        y = self.cross_attn(x, enc)
+        y = self.drop2(y)
+        y = self.layer_norm2(y + x)
+        z = self.ffd(y)
+        z = self.drop3(z)
+        z = layer_norm3(y + z)
+        return z
+
+
+class Transformer2D(Model):
+    def __init__(
+        self,
+        src_len,
+        trg_len,
+        num_class,
+        num_conv=3,
+        kernel=3,
+        num_heads=4,
+        num_hid=64,
+        num_enc=4,
+        num_dec=4,
+        drop_rate=0.1,
+    ):
+        super().__init__()
+
+        self.num_heads = num_heads
+        self.num_hid = (num_hid,)
+        self.num_enc = num_enc
+        self.num_dec = num_dec
+        self.num_class = num_class
+        self.src_len = src_len
+        self.trg_len = trg_len
+
+        self.dec_input = Embedding1D(src_len, num_class, num_hid=num_hid)
+        self.end_input = Embedding2D(
+            num_conv=num_conv, kernel=kernel, num_hid=num_hid
+        )
+
+        self.encoder = Sequential(
+            [
+                [self.embed2D]
+                + [
+                    Encoder(
+                        embed_dim=num_hid,
+                        num_hdeads=num_hdeads,
+                        drop_rate=drop_rate,
+                    )
+                    for _ in range(num_enc)
+                ]
+            ]
+        )
+
+        for i in range(num_dec):
+            setattr(self,
+                    f"decoder_{i}",
+                    Decoder(
+                        embed_dim=num_hid,
+                        num_hdeads=num_hdeads,
+                        drop_rate=drop_rate,
+                        ) 
+                    )
+
+        self.classifier = Dense(num_class)
+
+        def decode(self, enc, target):
+            y = self.def_input(target)
+            for i in range(self.num_dec):
+                y = getattr(self, f"decoder_{i}")(enc, y)
+            return y
+
+        def call(self, inputs):
+            x = self.enc_input(inputs[0])
+            enc = self.encoder(x)
+            y = self.decode(enc, inputs[1])
+            return self.classifier(y)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
